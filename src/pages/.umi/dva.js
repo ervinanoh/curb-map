@@ -20,7 +20,7 @@ export function _onCreate() {
     app.use(plugin);
   });
   
-  app.model({ namespace: 'curblr', ...(require('/home/eanoh/Bureau/Fabmob/Curblr/curbmap_fork/curb-map/src/models/curblr.ts').default) });
+  app.model({ namespace: 'curblr', ...(require('/home/lgharib/Documents/SFL/fabmob/fabmob/Curblr/curb-map/src/models/curblr.ts').default) });
   return app;
 }
 

@@ -1,277 +1,24 @@
-import React from "react";
-import styles from "./index.css";
-
-import { Layout, Menu, Icon, Card, Radio, Select, Badge, Button } from "antd";
-import { Pie } from "ant-design-pro/lib/Charts";
+import { CurbFeatureCollection } from "@/common/curblr";
+import { DateTimePickerComponent } from '@syncfusion/ej2-react-calendars';
+import { feature, featureCollection, GeoJSONObject } from "@turf/helpers";
 import "ant-design-pro/dist/ant-design-pro.css"; // Import whole style
-
-const { Header, Content, Footer, Sider } = Layout;
-
-import { formatMessage } from "umi-plugin-locale";
+import { Pie } from "ant-design-pro/lib/Charts";
+import { Button, Card, Descriptions, Layout, Radio, Select } from "antd";
+import axios from 'axios';
 import { connect } from "dva";
-
-//mapstyle, change to dark matter
-import mapStyle from "../assets/style.json";
 import { fromJS } from "immutable";
-
-import MapGL from "react-map-gl";
-import { GlobalState } from "@/common/types";
-
-import {
-  CurbFeature,
-  CurbFeatureCollection,
-  filterCurblrData //TODO FILTER DAY MONTH
-} from "@/common/curblr";
-import {
-  FeatureCollection,
-  featureCollection,
-  feature,
-  LineString
-} from "@turf/helpers";
-
+import React from "react";
+import MapGL, {Popup, FullscreenControl, GeolocateControl, Marker, NavigationControl, ScaleControl } from "react-map-gl";
+import Geocoder from 'react-map-gl-geocoder';
+//mapstyle, change to dark matter
 import { actions as curblrActions, geoDataFiles } from "../models/curblr";
-
-var mapboxAccessToken =
-  "pk.eyJ1Ijoic2FhZGlxbSIsImEiOiJjamJpMXcxa3AyMG9zMzNyNmdxNDlneGRvIn0.wjlI8r1S_-xxtq2d-W5qPA";
-
-//loads map style
-const defaultMapStyle = fromJS(mapStyle);
-
-//sunset
-// const MAXSTAY_COLOR_MAP:{ [key: string]: any } = {
-//     "3": "#FFDF00",
-//     "15": "#F1B408",
-//     "30": "#F1871C",
-//     "60": "#F06121",
-//     "120": "#F12627",
-//     "180": "#C80286",
-//     "240": "#63238A",
-// }
-
-//opposite of sunset
-// const MAXSTAY_COLOR_MAP:{ [key: string]: any } = {
-//     "3": "#FFDF00",
-//     "15": "#8BBA25",
-//     "30": "#018D5A",
-//     "60": "#00A8C4",
-//     "120": "#1078C3",
-//     "180": "#4336A2",
-//     "240": "#6D238A",
-// }
-
-//blues
-const MAXSTAY_COLOR_MAP: { [key: string]: any } = {
-  "3": "#e1f5fe",
-  "15": "#81d4fa",
-  "30": "#4fc3f7",
-  "60": "#03a9f4",
-  "120": "#0277bd",
-  "180": "#01579b",
-  "240": "#00345D"
-};
-
-//greens
-// const MAXSTAY_COLOR_MAP:{ [key: string]: any } = {
-//     "3": "#ffee58",
-//     "15": "#cddc39",
-//     "30": "#7cb342",
-//     "60": "#689f38",
-//     "120": "#388e3c",
-//     "180": "#1b5e20",
-//     "240": "#124116",
-// }
-
-const ACTIVITY_COLOR_MAP = {
-  "no standing": "#777777",
-  "no parking": "#DD2C00",
-  "passenger loading": "#FF9100",
-  "loading": "#FFEA00",
-  "transit": "#37B34A",
-  "free parking": "#00E5FF",
-  "paid parking": "#2979FF",
-  "restricted": "#AA00FF"
-};
-
-const scaledOffset = (offset: number) => {
-  return {
-    type: "exponential",
-    base: 2,
-    stops: [
-      [12, offset * Math.pow(2, 12 - 16)],
-      [16, offset * Math.pow(2, 16 - 16)]
-    ]
-  };
-};
-
-const scaledWidth = (width: number) => {
-  return {
-    type: "exponential",
-    base: 2,
-    stops: [
-      [12, width * Math.pow(2, 12 - 16)],
-      [16, width * Math.pow(2, 16 - 16)]
-    ]
-  };
-};
-
-const dataLayer = fromJS({
-  id: "dataLayer",
-  source: "curblrData",
-  type: "line",
-  interactive: true,
-  paint: {
-    "line-color": ["get", "color"],
-    "line-offset": ["get", "offset"],
-    "line-width": scaledWidth(6.8)
-  }
-});
-
-// sets average parking length (roughly 7m, per NACTO) for use in estimating length in # of parking spaces
-const avgParkingLength = 7;
-
-
-const renderCurblrData = (
-  data: CurbFeatureCollection,
-  day: string,
-  time: string,
-  filterType: string
-): FeatureCollection<LineString> => {
-  var renderData = featureCollection<LineString>([]);
-  var filteredData = filterCurblrData(data, day, time);//TODO FILTER DAY MONTH
-
-  for (var curbFeature of filteredData.features) {
-    var renderFeature = feature<LineString>(curbFeature.geometry);
-    renderFeature.properties = {};
-
-    for (var regulation of curbFeature.properties.regulations) {
-      // marks each feature with its length
-      renderFeature.properties.length =
-        curbFeature.properties.location.shstLocationEnd -
-        curbFeature.properties.location.shstLocationStart;
-
-      renderFeature.properties.priority = regulation.priority;
-
-      var priority = renderFeature.properties.priority;
-      // if(priority) {
-      var offsetPriority = 0;
-      //offsetPriority = (10 * priority);
-
-      var baseOffset = 10 + offsetPriority;
-      if (curbFeature.properties.location.sideOfStreet === "left")
-        baseOffset = 0 - 10 - offsetPriority;
-
-      renderFeature.properties["offset"] = baseOffset; //scaledOffset(baseOffset);
-
-      if (filterType === "maxStay") {
-        if (regulation.rule.maxStay) {
-          var maxStay = regulation.rule.maxStay + "";
-          if (MAXSTAY_COLOR_MAP[maxStay]) {
-            renderFeature.properties["color"] = MAXSTAY_COLOR_MAP[maxStay];
-            renderFeature.properties.maxStay = maxStay;
-            renderData.features.push(renderFeature);
-          }
-        }
-      }
-      // Splits out common activities and variants for an overall view. Features that fall into more than one "bucket" are duplicated, but handled by ensuring that they ultimately fall into the more specific bucket via painter's algorithm.
-      // Requires ts.3.7 because of null arrays - I lucked out on mine but this will break on a different environment
-      else if (filterType === "activity") {
-
-        if (regulation.rule.activity === "no parking") {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["no parking"];
-          // set the activty to use later in hooking up chart to map data
-          renderFeature.properties.activity = "no parking";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.rule.activity === "no standing"
-        ) {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["no standing"];
-          // set the activty to use later in hooking up chart to map data
-          renderFeature.properties.activity = "no standing";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.rule.activity === "parking" &&
-          !regulation.rule.payment &&
-          !regulation.userClasses?.some(uc => uc.classes?.length > 0)
-        ) {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["free parking"];
-          renderFeature.properties.activity = "free parking";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.rule.activity === "parking" &&
-          regulation.rule.payment &&
-          !regulation.userClasses?.some(uc => uc.classes?.length > 0)
-        ) {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["paid parking"];
-          renderFeature.properties.activity = "paid parking";
-          renderData.features.push(renderFeature);
-        }
-        if (regulation.rule.activity === "loading") {
-          renderFeature.properties["color"] = ACTIVITY_COLOR_MAP["loading"];
-          renderFeature.properties.activity = "loading";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.userClasses?.some(uc =>
-            [
-              "motorcycle",
-              "hotel guest",
-              "permit",
-              "reserved",
-              "handicap",
-              "scooter",
-              "bicycle",
-              "USPS",
-              "car share",
-              "police",
-              "tour bus"
-            ].some(c => uc.classes?.includes(c))
-          )
-        ) {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["restricted"];
-          renderFeature.properties.activity = "restricted";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.userClasses?.some(uc =>
-            ["taxi", "passenger", "TNC", "rideshare"].some(c =>
-              uc.classes?.includes(c)
-            )
-          )
-        ) {
-          renderFeature.properties["color"] =
-            ACTIVITY_COLOR_MAP["passenger loading"];
-          renderFeature.properties.activity = "passenger loading";
-          renderData.features.push(renderFeature);
-        }
-        if (
-          regulation.userClasses?.some(uc => uc.classes?.includes("transit"))
-        ) {
-          renderFeature.properties["color"] = ACTIVITY_COLOR_MAP["transit"];
-          renderFeature.properties.activity = "transit";
-          renderData.features.push(renderFeature);
-        }
-      }
-    }
-  }
-
-  return renderData;
-};
-
-const mapStateToProps = (d: GlobalState) => {
-  return d.curblr;
-};
-
-type PageStateProps = ReturnType<typeof mapStateToProps>;
-
-type PageProps = PageStateProps;
+import './index.css';
+import {
+  ACTIVITY_COLOR_MAP,
+  avgParkingLength, Content, dataLayer, defaultMapStyle, fullscreenControlStyle,
+  geolocateStyle, ICON, mapboxAccessToken, mapStateToProps, MAXSTAY_COLOR_MAP, navStyle, PageProps, renderCurblrData, scaleControlStyle, SIZE
+} from "./mapboxAccessToken";
+import Geometry from 'ol/geom/Geometry';
 
 class Map extends React.Component<PageProps, {}> {
   _mapRef: any;
@@ -291,19 +38,48 @@ class Map extends React.Component<PageProps, {}> {
       // PDX viewport 
       // latitude: 46.81214413176751,
       // longitude: -71.20566699900684,
-      latitude: 45.5322288090008, 
-      longitude: -73.63143205202765,
+      //Centre ville
+      longitude: -73.55664074263193,
+      latitude: 45.51326741594903,
+      // latitude: 45.5322288090008, 
+      // longitude: -73.63143205202765,
       zoom: 13
     },
-    showHideCard: true
+    showHideCard: true,
+    sl_arrondRef: "plaza",
+    set_dateTimeRef: new Date(),
+    data_to_replace: new CurbFeatureCollection(),
+    old_VS_new_selector: false,
+    mapclicked: false,
+    clickedLong: -73.62756337356329,//sfl
+    clickedLat: 45.533970387611184,
+    // description: {
+    //   assetType: null,
+    //   sideOfStreet: null,
+    //   streetName: null,
+    //   Fee: null,
+    //   maxStay: null,
+    //   timeSpansDates: null,
+    //   timeSpansDays: null
+    // }
+    description: "",
+    b_noBorne: "XXX",
+    b_periodes: "",
+    b_tarif: 0,
+    b_maxStay: 0,
+    b_nomRue: "XXX"
   };
-
+  
   constructor(props: any) {
     super(props);
-
     this.hideComponent = this.hideComponent.bind(this);
+    this.setArrond =  this.setArrond.bind(this);
+    this.setDateTime = this.setDateTime.bind(this);
+    // this.onClickMap = this.onClickMap.bind(this);
     this._mapRef = React.createRef();
   }
+
+  geocoderContainerRef = React.createRef();
 
   _setMapData = (newData: any) => {
     const map = this._getMap();
@@ -315,50 +91,6 @@ class Map extends React.Component<PageProps, {}> {
   _getMap = () => {
     return this._mapRef ? this._mapRef.current.getMap() : null;
   };
-
-
-  componentDidMount() {
-    this._loadData();
-
-    const map = this._getMap();
-
-    if (map) {
-      // TODO doesn't fire due to overlays div
-      map.on("mouseover", "dataLayer", function(e) {
-        console.log({ e });
-        var coordinates = e.features[0].geometry.coordinates.slice();
-        var description = e.features[0].properties.description;
-
-        // Ensure that if the map is zoomed out such that multiple
-        // copies of the feature are visible, the popup appears
-        // over the copy being pointed to.
-        while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
-          coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
-        }
-
-        // TODO needs work
-        // new mapboxgl.Popup()
-        // .setLngLat(coordinates)
-        // .setHTML(description)
-        // .addTo(map);
-      });
-    }
-
-    window.onresize = () => {
-      const { viewport } = this.state;
-      this.setState({
-        viewport: {
-          ...viewport,
-          width: window.innerWidth,
-          height: window.innerHeight
-        }
-      });
-    };
-  }
-
-  componentWillUnmount() {
-    window.onresize = null;
-  }
 
   _loadData() {
     const mapStyle = defaultMapStyle
@@ -379,6 +111,156 @@ class Map extends React.Component<PageProps, {}> {
       .set("layers", defaultMapStyle.get("layers").push(dataLayer));
 
     this.setState({ mapStyle });
+  };
+  
+  onClickMap(evt) {
+    console.log("Clicked Point: ", evt.lngLat);
+    var coords = evt.lngLat;
+    var description = this.getDescriptionFromCoords(coords)
+    this.setState(
+      { mapclicked: false,
+        clickedLong: coords[0],
+        clickedLat: coords[1],
+        // b_noBorne: description[0],
+        b_nomRue: description[0],
+        // b_periodes: description[2],
+        b_maxStay: description[2],
+        b_tarif: description[1]
+        });
+  };
+ 
+  getDescriptionFromCoords(coords){
+    var geojsonData = (this.state.old_VS_new_selector? this.state.data_to_replace : this.props.curblr.data);
+    // var geojsonData = this._getMap().getSource("curblrData")["_data"] //Not the right data to get properties
+    console.log("Geojson Data: ", geojsonData)
+    console.log("Data: ", )
+    const closestPlace   = this.getClosestFeature(coords, geojsonData)
+    var Properties     ;
+    var assetType      ;
+    var sideOfStreet   ;      
+    var streetName     ;              
+    var Fee            ;
+    var maxStay        ;                  
+    var timeSpansDays  ;
+    var timeSpansDates ;
+    try{
+      Properties = closestPlace.properties
+      assetType = closestPlace.properties.location.assetType
+      sideOfStreet = closestPlace.properties.location.sideOfStreet
+      streetName = closestPlace.properties.location.streetName
+      Fee = closestPlace.properties.regulations[0].payment.rates[0].fees[0]
+      maxStay = closestPlace.properties.regulations[0].rule.maxStay
+      timeSpansDays =  closestPlace.properties.regulations[0].timeSpans[0].daysOfWeek.days
+      timeSpansDates = closestPlace.properties.regulations[0].timeSpans[0].effectiveDates[0]
+      console.log("Closest place: ",  closestPlace);
+      console.log("Properties: ",     Properties)
+      console.log("assetType: ",      assetType)
+      console.log("sideOfStreet: ",   sideOfStreet)
+      console.log("streetName: ",     streetName)
+      console.log("Fee: ",            Fee)
+      console.log("maxStay: ",      maxStay)
+      console.log("timeSpans: ",    timeSpansDays, timeSpansDates)
+    }catch(err) {console.log("error")}
+
+    // var desc = [assetType, sideOfStreet, streetName, Fee, maxStay, timeSpansDates, timeSpansDays]
+    var desc = [streetName, Fee, maxStay]
+    return desc
+  }
+
+  isPointFeature (Feature) {
+    return (
+        Feature.type === 'Feature'
+        && Feature.geometry.type === 'Point'
+    );
+  }
+  
+  //https://albertoroura.com/get-closest-feature-featurecollection-given-feature/
+  getClosestFeature (coords, FeatureCollection) {
+    const lat1 = coords[1];
+    const lng1 = coords[0];
+    const radLat1 = Math.PI * lat1 / 180;
+    const nauticalMileToMile = Math.PI * 60 * 1.1515;
+
+    let lowestValue = 12451; // Earth average longest semicircle
+    let closestPlace = null;
+
+    for (const i in FeatureCollection.features) {
+        const thisFeature = FeatureCollection.features[i];
+        // console.log(i)
+        // if (!this.isPointFeature(thisFeature)) { //TODO:
+        //     continue;
+        // }
+
+        const lng2 = thisFeature.geometry.coordinates[0][0];
+        const lat2 = thisFeature.geometry.coordinates[0][1];//TODO: gerer le cas des features differents du Point
+        const placeMeta = thisFeature;
+        const radLat2 = Math.PI * lat2 / 180;
+        const theta = lng1 - lng2;
+        const radTheta = Math.PI * theta / 180;
+
+        let dist = Math.sin(radLat1) * Math.sin(radLat2) + Math.cos(radLat1) * Math.cos(radLat2) * Math.cos(radTheta);
+        dist = Math.acos(dist) * 180 / nauticalMileToMile;
+
+        if (dist < lowestValue) {
+            lowestValue = dist;
+            closestPlace = placeMeta;
+        }
+    }
+
+    return closestPlace;
+}
+
+  componentDidMount() {
+    this._loadData();
+
+    const map = this._getMap();
+
+    // if (map) {
+    //   // TODO doesn't fire due to overlays div
+    //   map.on("mouseover", "dataLayer", function(e) {
+    //     console.log({ e });
+    //     var coordinates = e.features[0].geometry.coordinates.slice();
+    //     console.log("coucou: ", coordinates);
+        
+    //     // Ensure that if the map is zoomed out such that multiple
+    //     // copies of the feature are visible, the popup appears
+    //     // over the copy being pointed to.
+    //     while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+    //       coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+    //     }
+    //     // TODO needs work
+    //     // new mapboxgl.Popup()
+    //     // .setLngLat(coordinates)
+    //     // .setHTML(description)
+    //     // .addTo(map);
+    //   });
+      
+    // }
+    // if (map) {
+    //   map.on('pointermove', function(event) {
+
+    //   });
+      
+    //   map.getViewport().addEventListener('mouseout', function(evt){
+    //       console.info('out');
+    //   }, false);
+    // }else
+    // {console.log("map is null", map)}
+
+    window.onresize = () => {
+      const { viewport } = this.state;
+      this.setState({
+        viewport: {
+          ...viewport,
+          width: window.innerWidth,
+          height: window.innerHeight
+        }
+      });
+    };
+  }
+
+  componentWillUnmount() {
+    window.onresize = null;
   }
 
   changeTime = (value: any) => {
@@ -418,7 +300,14 @@ class Map extends React.Component<PageProps, {}> {
   };
 
   changeGeoData = async (value) => {
+
+    // this.state.old_VS_new_selector = false;//SetState
+    this.setState({old_VS_new_selector: false});
     await this.props.dispatch(curblrActions.fetchGeoData(value));
+    console.log('day changeGeoData', this.state.day)
+    console.log('time changeGeoData', this.state.time)
+    console.log('mode changeGeoData', this.state.mode)
+
     var data = renderCurblrData(
       this.props.curblr.data,
       this.state.day,
@@ -427,7 +316,21 @@ class Map extends React.Component<PageProps, {}> {
     );
     this._setMapData(data);
   };
+
+  changeGeoDataFromPost = async (data_awaited) => {
   
+    // this.state.old_VS_new_selector = true;
+    this.setState({old_VS_new_selector: true});
+    const data_fetched_njson = await data_awaited;
+    var data = renderCurblrData(
+      data_fetched_njson,
+      this.state.day,
+      this.state.time,
+      this.state.mode
+    );
+    this._setMapData(data);
+  };
+ 
   hideComponent(name) {
     switch (name) {
       case "showHideCard":
@@ -436,15 +339,148 @@ class Map extends React.Component<PageProps, {}> {
       default:
         null;
     }
+  };
+
+  setDateTime = (sl_arrondRef) => {
+    this.setState({ sl_arrondRef });
+    console.log(`Option selected:`, sl_arrondRef.value);
+  };
+  
+  setArrond = (set_dateTimeRef) => {
+    this.setState({ set_dateTimeRef });
+    console.log(`Option selected:`, set_dateTimeRef.value);
+  };
+
+  sendRequest = async () =>{
+    // this.state.old_VS_new_selector = true;//While waiting for response(promise), this creates disparition of data in the card
+    // this.setState({old_VS_new_selector: true});// 
+    // let uri = "http://127.0.0.1:8081/items";
+    let uri = "https://143.198.46.93/";
+
+
+    const payload = {
+      "true_date_time": this.state.set_dateTimeRef,
+      "arrond_quartier": this.state.sl_arrondRef,
+      "price": 3,
+      "minStay": 32
+    }
+    //TODO: await
+    await axios.post(uri, payload)
+      .then((response) => {
+        console.log(response);
+        console.log(response.data);
+      
+      this.setState({data_to_replace:response.data});
+      // this.state.data_to_replace = response.data;//setState
+      this.changeGeoDataFromPost(response.data);
+      }, (error) => {
+        console.log(error);
+      });
+  };
+
+  handleChange = (name, event) => {
+    this.setState({
+      [name]: event.target.value
+    }, () => {
+      console.log(this.state.sl_arrondRef);
+      console.log(this.state.set_dateTimeRef)
+      // Prints the new value.
+    });
+  };
+
+  CityInfo = (props) => {
+    const {info} = props;
+    const displayName = `${info.city}, ${info.state}`;
+  
+    return (
+      <div>
+        <div>
+          {displayName} |{' '}
+          <a
+            target="_new"
+            href={`http://en.wikipedia.org/w/index.php?title=Special:Search&search=${displayName}`}
+          >
+            Wikipedia
+          </a>
+        </div>
+        <img width={240} src={info.image} />
+      </div>
+    );
   }
 
+  ControlPanel = () => {
+    return (
+      <div className="control-panel">
+        <h3>Marker, Popup, NavigationControl and FullscreenControl </h3>
+        <p>
+          Map showing top 20 most populated cities of the United States. Click on a marker to learn
+          more.
+        </p>
+        <p>
+          Data source:{' '}
+          <a href="https://en.wikipedia.org/wiki/List_of_United_States_cities_by_population">
+            Wikipedia
+          </a>
+        </p>
+        <div className="source-link">
+          <a
+            href="https://github.com/visgl/react-map-gl/tree/6.1-release/examples/controls"
+            target="_new"
+          >
+            View Code ↗
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Important for perf: the markers never change, avoid rerender when the map viewport changes
+  Pins = (props) => {
+    const {data, onClick} = props;
+
+    return data.map((city, index) => (
+      <Marker key={`marker-${index}`} longitude={city.longitude} latitude={city.latitude}>
+        <svg
+          height={SIZE}
+          viewBox="0 0 24 24"
+          style={{
+            cursor: 'pointer',
+            fill: '#d00',
+            stroke: 'none',
+            transform: `translate(${-SIZE / 2}px,${-SIZE}px)`
+          }}
+          onClick={() => onClick(city)}
+        >
+          <path d={ICON} />
+        </svg>
+      </Marker>
+    ));
+  }
 
   render() {
-    const { viewport, mapStyle, day, time, mode, showHideCard } = this.state;
+    const { viewport,
+            mapStyle,
+            day,
+            time,
+            mode,
+            showHideCard,
+            set_dateTimeRef,
+            data_to_replace,
+            old_VS_new_selector,
+            geocoderContainerRef,
+            clickedLong,
+            clickedLat,
+            // description,
+            b_noBorne,
+            b_periodes,
+            b_tarif,
+            b_nomRue
+          } = this.state;
 
   // shows everything. would be great if this could intersect the feature collection with the viewport bounding box. i can't figure it out. for kevin?
-    const features = renderCurblrData(
-      this.props.curblr.data,
+  const dt_to_set = (old_VS_new_selector? data_to_replace : this.props.curblr.data);
+  const features = renderCurblrData(
+      dt_to_set,
       this.state.day,
       this.state.time,
       this.state.mode
@@ -453,7 +489,7 @@ class Map extends React.Component<PageProps, {}> {
   // takes CurbLR feed (loaded into map as a prop, above) and puts it into a "dataUri" that can be downloaded from the export button. (Linking to file pathway doesn't work bc of umi build... couldn't find a static location for the data)
     let curblrStr = JSON.stringify(this.props.curblr.data);
     let curblrDataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(curblrStr);
-
+  
     const ACTIVITY_LENGTH_CALC = {
       "no standing": features.features
         .filter(f => f.properties.activity === "no standing")
@@ -597,219 +633,371 @@ class Map extends React.Component<PageProps, {}> {
         y: MAXSTAY_LENGTH_CALC["240"]
       }
     ];
-
-    // time query below adds one minute to selected time, to reconcile conflicting regulations that begin and end at the hour mark
+   
+    const arrondissements_montreal = [
+      { label: "plaza", value: "plaza"},
+      { label: "Outremont", value: "Outremont"},
+      // { label: "LaSalle", value: "LaSalle"},
+      // { label: "Mont-Royal", value: "Mont-Royal"},
+      // { label: "Ville-Marie", value: "Ville-Marie"},//weird
+      { label: "Le Plateau-Mont-Royal", value: "Le Plateau-Mont-Royal"},
+      // { label: "Hampstead", value: "Hampstead"},
+      { label: "Le Sud-Ouest", value: "Le Sud-Ouest"},
+      // { label: "Rivière-des-Prairies-Pointe-aux-Trembles", value: "Rivière-des-Prairies-Pointe-aux-Trembles"},
+      { label: "Lachine", value: "Lachine"},
+      // { label: "Dorval", value: "Dorval"},
+      // { label: "Montréal-Nord", value: "Montréal-Nord"},
+      // { label: "L'Île-Bizard-Sainte-Geneviève", value: "L'Île-Bizard-Sainte-Geneviève"},
+      // { label: "Kirkland", value: "Kirkland"},
+      // { label: "Dollard-des-Ormeaux", value: "Dollard-des-Ormeaux"},
+      // { label: "Senneville", value: "Senneville"},
+      { label: "Ahuntsic-Cartierville", value: "Ahuntsic-Cartierville"},
+      // { label: "Côte-Saint-Luc", value: "Côte-Saint-Luc"},
+      // { label: "Saint-Léonard", value: "Saint-Léonard"},
+      // { label: "Montréal-Ouest", value: "Montréal-Ouest"},
+      // { label: "Pointe-Claire", value: "Pointe-Claire"},
+      // { label: "L'Île-Dorval", value: "L'Île-Dorval"},
+      { label: "Mercier-Hochelaga-Maisonneuve", value: "Mercier-Hochelaga-Maisonneuve"},
+      { label: "Côte-des-Neiges-Notre-Dame-de-Grâce", value: "Côte-des-Neiges-Notre-Dame-de-Grâce"},
+      { label: "Rosemont-La Petite-Patrie", value: "Rosemont-La Petite-Patrie"},
+      { label: "Saint-Laurent", value: "Saint-Laurent"},
+      // { label: "Beaconsfield", value: "Beaconsfield"},
+      { label: "Villeray-Saint-Michel-Parc-Extension", value: "Villeray-Saint-Michel-Parc-Extension"},
+      // { label: "Westmount", value: "Westmount"},
+      // { label: "Montréal-Est", value: "Montréal-Est"},
+      // { label: "Anjou", value: "Anjou"},
+      // { label: "Pierrefonds-Roxboro", value: "Pierrefonds-Roxboro"},
+      // { label: "Sainte-Anne-de-Bellevue", value: "Sainte-Anne-de-Bellevue"},
+      { label: "Verdun", value: "Verdun"},
+      // { label: "Baie-d'Urfé", value: "Baie-d'Urfé"},
+    ];
+ 
     return (
       <Layout>
         <button onClick={() => this.hideComponent("showHideCard")}>
-                Hide/Show Menu
-              </button>
-
+          Hide/Show Menu
+        </button>
+    
         <Content>
           <MapGL
             ref={this._mapRef}
             mapboxApiAccessToken={mapboxAccessToken}
             mapStyle={mapStyle}
             {...viewport}
-            onViewportChange={viewport => this.setState({ viewport })}
+            onViewportChange={(viewport) => this.setState({ viewport })}
+            onClick={(evt) => this.onClickMap(evt)}
+          >
+          <Popup
+            latitude={clickedLat}
+            longitude={clickedLong}
+            closeButton={true}
+            closeOnClick={false}
+            // onClose={() => togglePopup(false)}
+            anchor="top" >
+            {/* <div>{description}</div> */}
+            {/* <div>Borne: {b_noBorne}</div> */}
+            <div>Rue: {b_nomRue}</div>
+            <br />
+            <div>Tarif horaire: {b_tarif} dollars</div>
+            <br />
+            {/* <div>Périodes tarifées: </div>
+            <div>{b_periodes}</div> */}
+            
+          </Popup>
+            <div style={{ width: "40px" }}>
+              {/* , right:"40px", position:"fixed"}}> */}
+              <GeolocateControl style={geolocateStyle} />
+              {/* <FullscreenControl style={fullscreenControlStyle} />
+              <NavigationControl style={navStyle} />
+              <ScaleControl style={scaleControlStyle} /> */}
+            </div>
+          </MapGL>
+          <div
+            ref={geocoderContainerRef}
+            style={{ position: "absolute", top: 20, left: 20, zIndex: 1 }}
           />
         </Content>
         {showHideCard && (
           <Card
-          size="small"
-          title="Stationnements Montréal et Québec, QC"
-          bordered={true}
-          style={{
-            position: "fixed",
-            top: "40px",
-            left: "40px",
-            width: "310px",
-            height: "auto",
-            maxHeight: "100vh",
-            overflow: "auto"
-          }}
-        >
-          <br />
-          &nbsp; &nbsp;Arrondissement/quartier à afficher:{" "}
-          <Select onChange={this.changeGeoData} 
-          style={{
-            // position: "fixed",
-            // top: "40px",
-            // left: "40px",
-            width: "275px"
-          }}>
-            {React.Children.toArray(geoDataFiles.map((f) =>
-              <Select.Option value={f.path}>
-                {f.label}
-              </Select.Option>
-            ))}
-          </Select>
-          <br />
-          <br />
-          &nbsp; &nbsp;Day:{" "}
-          <Select defaultValue={day} onChange={this.changeDay}>
-            <Select.Option value="mo">Monday</Select.Option>
-            <Select.Option value="tu">Tuesday</Select.Option>
-            <Select.Option value="we">Wednesday</Select.Option>
-            <Select.Option value="th">Thursday</Select.Option>
-            <Select.Option value="fr">Friday</Select.Option>
-            <Select.Option value="sa">Saturday</Select.Option>
-            <Select.Option value="su">Sunday</Select.Option>
-          </Select>
-          &nbsp; &nbsp; Time:{" "}
-          <Select defaultValue={time} onChange={this.changeTime}
-          style={{
-            // position: "fixed",
-            // top: "40px",
-            // left: "40px",
-            width: "85px"
-          }}>
-            <Select.Option value="00:01">00:00</Select.Option>
-            <Select.Option value="01:01">01:00</Select.Option>
-            <Select.Option value="02:01">02:00</Select.Option>
-            <Select.Option value="03:01">03:00</Select.Option>
-            <Select.Option value="04:01">04:00</Select.Option>
-            <Select.Option value="05:01">05:00</Select.Option>
-            <Select.Option value="06:01">06:00</Select.Option>
-            <Select.Option value="07:01">07:00</Select.Option>
-            <Select.Option value="08:01">08:00</Select.Option>
-            <Select.Option value="09:01">09:00</Select.Option>
-            <Select.Option value="10:01">10:00</Select.Option>
-            <Select.Option value="11:01">11:00</Select.Option>
-            <Select.Option value="12:01">12:00</Select.Option>
-            <Select.Option value="13:01">13:00</Select.Option>
-            <Select.Option value="14:01">14:00</Select.Option>
-            <Select.Option value="15:01">15:00</Select.Option>
-            <Select.Option value="16:01">16:00</Select.Option>
-            <Select.Option value="17:01">17:00</Select.Option>
-            <Select.Option value="18:01">18:00</Select.Option>
-            <Select.Option value="19:01">19:00</Select.Option>
-            <Select.Option value="20:01">20:00</Select.Option>
-            <Select.Option value="21:01">21:00</Select.Option>
-            <Select.Option value="22:01">22:00</Select.Option>
-            <Select.Option value="23:01">23:00</Select.Option>
-          </Select>
-          <br />
-          <br />
-          View by:{" "}
-          <Radio.Group
-            defaultValue={mode}
-            buttonStyle="solid"
-            position="center"
-            onChange={this.changeMode}
+            size="small"
+            title="Stationnements Montréal et Québec, QC"
+            bordered={true}
+            style={{
+              position: "fixed",
+              top: "40px",
+              left: "40px",
+              width: "350px",
+              height: "auto",
+              maxHeight: "100vh",
+              overflow: "auto",
+            }}
           >
-            <Radio.Button value="activity">Activity</Radio.Button>
-            <Radio.Button value="maxStay">Max Stay</Radio.Button>
-          </Radio.Group>
-          <br />
-          <br />
-          {mode === "maxStay" ? (
-            <Pie
-              animate={false}
-              colors={Object.values(MAXSTAY_COLOR_MAP)}
-              hasLegend
-              title="Maximum Stay"
-              subTitle={
-                <>
-                  Total car
-                  <br />
-                  lengths
-                </>
-              }
-              total={() => (
-                <>
+            <br />
+            &nbsp; &nbsp;Arrondissement/quartier à afficher:{" "}
+            <Select
+              onChange={this.changeGeoData}
+              style={{
+                // position: "fixed",
+                // top: "40px",
+                // left: "40px",
+                width: "275px",
+              }}
+            >
+              {React.Children.toArray(
+                geoDataFiles.map((f) => (
+                  <Select.Option value={f.path}>{f.label}</Select.Option>
+                ))
+              )}
+            </Select>
+            <br />
+            <br />
+            &nbsp; &nbsp;Day:{" "}
+            <Select defaultValue={day} onChange={this.changeDay}>
+              <Select.Option value="mo">Monday</Select.Option>
+              <Select.Option value="tu">Tuesday</Select.Option>
+              <Select.Option value="we">Wednesday</Select.Option>
+              <Select.Option value="th">Thursday</Select.Option>
+              <Select.Option value="fr">Friday</Select.Option>
+              <Select.Option value="sa">Saturday</Select.Option>
+              <Select.Option value="su">Sunday</Select.Option>
+            </Select>
+            &nbsp; &nbsp;Time:{" "}
+            <Select
+              defaultValue={time}
+              onChange={this.changeTime}
+              style={{
+                // position: "fixed",
+                // top: "40px",
+                // left: "40px",
+                width: "85px",
+              }}
+            >
+              <Select.Option value="00:01">00:00</Select.Option>
+              <Select.Option value="01:01">01:00</Select.Option>
+              <Select.Option value="02:01">02:00</Select.Option>
+              <Select.Option value="03:01">03:00</Select.Option>
+              <Select.Option value="04:01">04:00</Select.Option>
+              <Select.Option value="05:01">05:00</Select.Option>
+              <Select.Option value="06:01">06:00</Select.Option>
+              <Select.Option value="07:01">07:00</Select.Option>
+              <Select.Option value="08:01">08:00</Select.Option>
+              <Select.Option value="09:01">09:00</Select.Option>
+              <Select.Option value="10:01">10:00</Select.Option>
+              <Select.Option value="11:01">11:00</Select.Option>
+              <Select.Option value="12:01">12:00</Select.Option>
+              <Select.Option value="13:01">13:00</Select.Option>
+              <Select.Option value="14:01">14:00</Select.Option>
+              <Select.Option value="15:01">15:00</Select.Option>
+              <Select.Option value="16:01">16:00</Select.Option>
+              <Select.Option value="17:01">17:00</Select.Option>
+              <Select.Option value="18:01">18:00</Select.Option>
+              <Select.Option value="19:01">19:00</Select.Option>
+              <Select.Option value="20:01">20:00</Select.Option>
+              <Select.Option value="21:01">21:00</Select.Option>
+              <Select.Option value="22:01">22:00</Select.Option>
+              <Select.Option value="23:01">23:00</Select.Option>
+            </Select>
+            <br />
+            <br />
+            &nbsp; &nbsp;View by:{" "}
+            <Radio.Group
+              defaultValue={mode}
+              buttonStyle="solid"
+              position="center"
+              onChange={this.changeMode}
+            >
+              <Radio.Button value="activity">Activity</Radio.Button>
+              <Radio.Button value="maxStay">Max Stay</Radio.Button>
+            </Radio.Group>
+            <br />
+            <br />
+            {mode === "maxStay" ? (
+              <Pie
+                animate={false}
+                colors={Object.values(MAXSTAY_COLOR_MAP)}
+                hasLegend
+                title="Maximum Stay"
+                subTitle={
+                  <>
+                    Total car
+                    <br />
+                    lengths
+                  </>
+                }
+                total={() => (
+                  <>
+                    <span>
+                      {(
+                        maxStayPieData.reduce((pre, now) => now.y + pre, 0) /
+                        avgParkingLength
+                      ).toLocaleString("en", {
+                        style: "decimal",
+                        maximumFractionDigits: 0,
+                        minimumFractionDigits: 0,
+                      })}
+                    </span>
+                  </>
+                )}
+                data={maxStayPieData}
+                valueFormat={(val) => (
                   <span>
-                    {(
-                      maxStayPieData.reduce((pre, now) => now.y + pre, 0) /
-                      avgParkingLength
-                    ).toLocaleString("en", {
+                    {(val / avgParkingLength).toLocaleString("en", {
                       style: "decimal",
                       maximumFractionDigits: 0,
-                      minimumFractionDigits: 0
-                    })}
+                      minimumFractionDigits: 0,
+                    })}{" "}
+                    cars
                   </span>
-                </>
-              )}
-              data={maxStayPieData}
-              valueFormat={val => (
-                <span>
-                  {(val / avgParkingLength).toLocaleString("en", {
-                    style: "decimal",
-                    maximumFractionDigits: 0,
-                    minimumFractionDigits: 0
-                  })}{" "}
-                  cars
-                </span>
-              )}
-              height={240}
-            />
-          ) : (
-            <Pie
-              animate={false}
-              colors={Object.values(ACTIVITY_COLOR_MAP)}
-              hasLegend
-              title="Activities"
-              subTitle={
-                <>
-                  Total car
-                  <br />
-                  lengths
-                </>
-              }
-              total={() => (
-                <>
+                )}
+                height={240}
+              />
+            ) : (
+              <Pie
+                animate={false}
+                colors={Object.values(ACTIVITY_COLOR_MAP)}
+                hasLegend
+                title="Activities"
+                subTitle={
+                  <>
+                    Total car
+                    <br />
+                    lengths
+                  </>
+                }
+                total={() => (
+                  <>
+                    <span>
+                      {(
+                        activityPieData.reduce((pre, now) => now.y + pre, 0) /
+                        avgParkingLength
+                      ).toLocaleString("en", {
+                        style: "decimal",
+                        maximumFractionDigits: 0,
+                        minimumFractionDigits: 0,
+                      })}
+                    </span>
+                  </>
+                )}
+                data={activityPieData}
+                valueFormat={(val) => (
                   <span>
-                    {(
-                      activityPieData.reduce((pre, now) => now.y + pre, 0) /
-                      avgParkingLength
-                    ).toLocaleString("en", {
+                    {(val / avgParkingLength).toLocaleString("en", {
                       style: "decimal",
                       maximumFractionDigits: 0,
-                      minimumFractionDigits: 0
-                    })}
+                      minimumFractionDigits: 0,
+                    })}{" "}
+                    cars
                   </span>
-                </>
-              )}
-              data={activityPieData}
-              valueFormat={val => (
-                <span>
-                  {(val / avgParkingLength).toLocaleString("en", {
-                    style: "decimal",
-                    maximumFractionDigits: 0,
-                    minimumFractionDigits: 0
-                  })}{" "}
-                  cars
-                </span>
-              )}
-              height={240}
-            />
-          )}
-          <br />
-          <Button type="primary" icon="download" block href={curblrDataUri} download="export.curblr.json">
-                    Download CurbLR data
-          </Button>
-          <br />
-          <br />
-          <p style={{ "font-size": "11px" }}>
-            Données de stationnements des villes <a href= "https://donnees.montreal.ca/ville-de-montreal/stationnement-sur-rue-signalisation-courant"> de Montréal </a> et de 
-            <a href= "https://www.donneesquebec.ca/recherche/fr/dataset/vque_7"> de Québec </a>
-          </p>
-        </Card>
+                )}
+                height={240}
+              />
+            )}
+            <br />
+            <Button
+              type="primary"
+              icon="download"
+              block
+              href={curblrDataUri}
+              download="export.curblr.json"
+            >
+              Download CurbLR data
+            </Button>
+            <br />
+            <br />
+            <p style={{ "font-size": "11px" }}>
+              Données de stationnements des villes{" "}
+              <a href="https://donnees.montreal.ca/ville-de-montreal/stationnement-sur-rue-signalisation-courant">
+                {" "}
+                de Montréal{" "}
+              </a>{" "}
+              et de
+              <a href="https://www.donneesquebec.ca/recherche/fr/dataset/vque_7">
+                {" "}
+                de Québec{" "}
+              </a>
+            </p>
+          </Card>
         )}
+    
+        {/* {showHideCard && (
+          <Card
+            size="small"
+            title="Filter"
+            bordered={true}
+            style={{
+              position: "fixed",
+              // top: "80px",
+              bottom: "80px",
+              right: "40px",
+              width: "auto",
+              height: "auto",
+              maxHeight: "100vh",
+              overflow: "auto",
+            }}
+          >
+            <div>
+              <Geocoder
+                mapRef={this._mapRef}
+                containerRef={geocoderContainerRef}
+                onViewportChange={(viewport) => this.setState({ viewport })}
+                mapboxApiAccessToken={mapboxAccessToken}
+              />
+            </div>
+            <div>
+              <label htmlFor="sl_arrondissement">Arrondissement: </label>
+              <select
+                id="sl_arrondissement"
+                // onChange={this.setArrond}
+                onChange={(event) => this.handleChange("sl_arrondRef", event)}
+              >
+                {arrondissements_montreal.map((option) => (
+                  <option value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="dt_picker"
+                style={{
+                  textAlign: "justify",
+                }}
+              >
+                Date et heure:{" "}
+              </label>
+              <DateTimePickerComponent
+                placeholder="Choose a date and time"
+                value={set_dateTimeRef}
+                // min={minDate}
+                // max={maxDate}
+                id="dt_picker"
+                format="dd-MMM-yy HH:mm"
+                step={15}
+                onChange={(event) => this.handleChange("set_dateTimeRef", event)}
+              ></DateTimePickerComponent>
+            </div>
+            <div>
+              <Button type="primary" icon="search" onClick={this.sendRequest}>
+                Filtrer
+              </Button>
+            </div>
+          </Card>
+        )}
+     */}
         <Button
           size="small"
-          type="primary" 
+          type="primary"
           href="https://wiki.lafabriquedesmobilites.fr/wiki/Carte_CurbLR_de_Montr%C3%A9al"
           style={{
             position: "fixed",
             bottom: "40px",
-            right: "40px"
+            right: "40px",
           }}
         >
-            Plus d'informations sur la carte ici
+          Plus d'informations sur la carte ici
         </Button>
       </Layout>
     );
+    
   }
 }
 
